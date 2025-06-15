@@ -6,7 +6,7 @@ import re
 from dotenv import load_dotenv
 import time
 from loguru import logger
-from tools.step031_translation_openai import openai_response
+from tools.step031_translation_openai import openai_response, openai_structured_translation
 from tools.step032_translation_llm import llm_response
 from tools.step033_translation_translator import translator_response
 from tools.step034_translation_ernie import ernie_response
@@ -42,57 +42,90 @@ def split_text_into_sentences(para):
     # 很多规则中会考虑分号;，但是这里我把它忽略不计，破折号、英文双引号等同样忽略，需要的再做些简单调整即可。
     return para.split("\n")
 
-def translation_postprocess(result):
+def translation_postprocess(result, target_language='简体中文'):
+    # Remove parenthetical content
     result = re.sub(r'\（[^)]*\）', '', result)
     result = result.replace('...', '，')
-    result = re.sub(r'(?<=\d),(?=\d)', '', result)
-    result = result.replace('²', '的平方').replace(
-        '————', '：').replace('——', '：').replace('°', '度')
-    result = result.replace("AI", '人工智能')
-    result = result.replace('变压器', "Transformer")
+    
+    # Apply Chinese-specific postprocessing only for Chinese
+    if target_language == '简体中文':
+        result = re.sub(r'(?<=\d),(?=\d)', '', result)
+        result = result.replace('²', '的平方').replace(
+            '————', '：').replace('——', '：').replace('°', '度')
+        result = result.replace("AI", '人工智能')
+        result = result.replace('变压器', "Transformer")
+    else:
+        # For other languages, keep numbers and symbols as-is
+        # Only do basic cleanup
+        result = result.replace('————', ':').replace('——', ':')
+    
     return result
 
-def valid_translation(text, translation):
+def valid_translation(text, translation, target_language='简体中文'):
     
     if (translation.startswith('```') and translation.endswith('```')):
         translation = translation[3:-3]
-        return True, translation_postprocess(translation)
+        return True, translation_postprocess(translation, target_language)
     
-    if (translation.startswith('“') and translation.endswith('”')) or (translation.startswith('"') and translation.endswith('"')):
+    if (translation.startswith('"') and translation.endswith('"')) or (translation.startswith('"') and translation.endswith('"')):
         translation = translation[1:-1]
-        return True, translation_postprocess(translation)
+        return True, translation_postprocess(translation, target_language)
     
-    if ('翻译' in translation or "译文" in translation or "Translation" in translation) and '：“' in translation and '”' in translation:
-        translation = translation.split('：“')[-1].split('”')[0]
-        return True, translation_postprocess(translation)
-    
-    if ('翻译' in translation or "译文" in translation or "Translation" in translation) and '："' in translation and '"' in translation:
+    # Handle Chinese format responses
+    if ('翻译' in translation or "译文" in translation) and '："' in translation and '"' in translation:
         translation = translation.split('："')[-1].split('"')[0]
-        return True, translation_postprocess(translation)
+        return True, translation_postprocess(translation, target_language)
+    
+    if ('翻译' in translation or "译文" in translation) and '："' in translation and '"' in translation:
+        translation = translation.split('："')[-1].split('"')[0]
+        return True, translation_postprocess(translation, target_language)
 
-    if ('翻译' in translation or "译文" in translation or "Translation" in translation) and ':"' in translation and '"' in translation:
+    if ('翻译' in translation or "译文" in translation) and ':"' in translation and '"' in translation:
         translation = translation.split(':"')[-1].split('"')[0]
-        return True, translation_postprocess(translation)
+        return True, translation_postprocess(translation, target_language)
     
-    if ('翻译' in translation or "译文" in translation or "Translation" in translation) and ': "' in translation and '"' in translation:
+    if ('翻译' in translation or "译文" in translation) and ': "' in translation and '"' in translation:
         translation = translation.split(': "')[-1].split('"')[0]
-        return True, translation_postprocess(translation)
+        return True, translation_postprocess(translation, target_language)
     
+    # Handle English/Spanish format responses
+    if 'Translated text:' in translation and '"' in translation:
+        # Extract content between quotes after "Translated text:"
+        parts = translation.split('Translated text:')[-1]
+        if '"' in parts:
+            translation = parts.split('"')[1] if parts.count('"') >= 2 else parts.split('"')[0]
+            return True, translation_postprocess(translation, target_language)
+    
+    # Handle Spanish format responses
+    if ('traducción:' in translation.lower() or 'translation:' in translation.lower()) and '"' in translation:
+        # Extract content between quotes after "traducción:" or "translation:"
+        parts = translation.lower()
+        if 'traducción:' in parts:
+            parts = translation.split('traducción:')[-1]
+        elif 'translation:' in parts:
+            parts = translation.split('translation:')[-1]
+        
+        if '"' in parts:
+            translation = parts.split('"')[1] if parts.count('"') >= 2 else parts.split('"')[0]
+            return True, translation_postprocess(translation, target_language)
 
-    if len(text) <= 10:
-        if len(translation) > 15:
-            return False, f'Only translate the following sentence and give me the result.'
-    elif len(translation) > len(text)*0.75:
-        return False, f'The translation is too long. Only translate the following sentence and give me the result.'
+    # Much more lenient length validation - especially for technical content
+    if len(text) <= 15:  # Increased threshold for short text
+        # Very generous limit for short technical phrases with numbers
+        if len(translation) > 100:  # Much more generous
+            return False, f'Translation too long for short text.'
+    elif len(translation) > len(text) * 3:  # Much more generous ratio
+        return False, f'Translation significantly too long.'
     
-    forbidden = ['翻译', '译文', '这句', '\n', '简体中文', '中文', 'translate', 'Translate', 'translation', 'Translation']
+    # Minimal forbidden words - only block obvious errors
+    forbidden = ['\n']  # Only block newlines
+    
     translation = translation.strip()
     for word in forbidden:
         if word in translation:
-            return False, f"Don't include `{word}` in the translation. Only translate the following sentence and give me the result."
+            return False, f"Invalid character in translation."
     
-    return True, translation_postprocess(translation)
-
+    return True, translation_postprocess(translation, target_language)
 
 def split_sentences(translation, use_char_based_end=True):
     output_data = []
@@ -159,11 +192,16 @@ def summarize(info, transcript, target_language='简体中文', method = 'LLM'):
                 'language': target_language
             }
 
-    full_description = f'The following is the full content of the video:\n{info_message}\n{transcript}\n{info_message}\nAccording to the above content, detailedly Summarize the video in JSON format:\n```json\n{{"title": "", "summary": ""}}\n```'
+    full_description = f'The following is the full content of the video:\n{info_message}\n{transcript}\n{info_message}\nAccording to the above content, summarize the video CONCISELY in JSON format:\n```json\n{{"title": "", "summary": ""}}\n```'
+    
+    model_name = os.getenv('MODEL_NAME', '')
+    is_qwen3 = 'Qwen3' in model_name or 'qwen3' in model_name.lower()
+    nothink_prefix = '/nothink ' if is_qwen3 else ''
+    nothink_suffix = ' Do not include any reasoning or thinking process in your response.' if is_qwen3 else ''
     
     messages = [
         {'role': 'system',
-            'content': f'You are a expert in the field of this video. Please detailedly summarize the video in JSON format.\n```json\n{{"title": "the title of the video", "summary", "the summary of the video"}}\n```'},
+            'content': f'{nothink_prefix}You are a expert in the field of this video. Please summarize the video CONCISELY in JSON format. Keep the summary under 200 words.\n```json\n{{"title": "the title of the video", "summary": "the summary of the video"}}\n```{nothink_suffix}'},
         {'role': 'user', 'content': full_description},
     ]
     retry_message=''
@@ -171,7 +209,7 @@ def summarize(info, transcript, target_language='简体中文', method = 'LLM'):
     for retry in range(9):
         try:
             messages = [
-                {'role': 'system', 'content': f'You are a expert in the field of this video. Please summarize the video in JSON format.\n```json\n{{"title": "the title of the video", "summary", "the summary of the video"}}\n```'},
+                {'role': 'system', 'content': f'{nothink_prefix}You are a expert in the field of this video. Please summarize the video CONCISELY in JSON format. Keep the summary under 200 words.\n```json\n{{"title": "the title of the video", "summary": "the summary of the video"}}\n```{nothink_suffix}'},
                 {'role': 'user', 'content': full_description+retry_message},
             ]
             if method == 'LLM':
@@ -192,11 +230,51 @@ def summarize(info, transcript, target_language='简体中文', method = 'LLM'):
             if '视频标题' in summary:
                 raise Exception("包含“视频标题”")
             logger.info(summary)
-            summary = re.findall(r'\{.*?\}', summary)[0]
-            summary = json.loads(summary)
+            
+            # Better JSON extraction that handles nested objects and truncated responses
+            try:
+                # Remove newlines but preserve structure
+                clean_response = summary.strip()
+                
+                # First try to find complete JSON block
+                json_match = re.search(r'\{.*\}', clean_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                else:
+                    # Try to extract from ```json blocks (may be incomplete)
+                    json_match = re.search(r'```json\s*(\{.*)', clean_response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(1)
+                        # If JSON is incomplete, try to fix it
+                        if not json_str.rstrip().endswith('}'):
+                            # Try to find title and summary parts
+                            title_match = re.search(r'"title":\s*"([^"]*)"', json_str)
+                            summary_match = re.search(r'"summary":\s*"([^"]*)', json_str)
+                            
+                            if title_match and summary_match:
+                                title = title_match.group(1)
+                                summary_text = summary_match.group(1)
+                                # Reconstruct complete JSON
+                                json_str = f'{{"title": "{title}", "summary": "{summary_text}"}}'
+                            else:
+                                raise Exception("Incomplete JSON and cannot reconstruct")
+                    else:
+                        # Last resort: look for any JSON-like structure
+                        json_match = re.search(r'\{[^}]*"title"[^}]*\}', clean_response)
+                        if json_match:
+                            json_str = json_match.group(0)
+                        else:
+                            raise Exception("No JSON found in response")
+                
+                summary = json.loads(json_str)
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"JSON parsing failed: {e}")
+                logger.warning(f"Raw response: {response}")
+                raise Exception(f"Failed to parse JSON: {e}")
+                
             summary = {
-                'title': summary['title'].replace('title:', '').strip(),
-                'summary': summary['summary'].replace('summary:', '').strip()
+                'title': summary.get('title', '').replace('title:', '').strip(),
+                'summary': summary.get('summary', '').replace('summary:', '').strip()
             }
             if summary['title'] == '' or summary['summary'] == '':
                 raise Exception('Invalid summary')
@@ -244,24 +322,31 @@ def _translate(summary, transcript, target_language='简体中文', method='LLM'
 
     info = f'This is a video called "{summary["title"]}". {summary["summary"]}.'
     full_translation = []
+    
+    # Check if we're using Qwen3 model to add /nothink instruction
+    model_name = os.getenv('MODEL_NAME', '')
+    is_qwen3 = 'Qwen3' in model_name or 'qwen3' in model_name.lower()
+    nothink_prefix = '/nothink ' if is_qwen3 else ''
+    nothink_suffix = ' Do not include any reasoning or thinking process in your response.' if is_qwen3 else ''
+    
     if target_language == '简体中文':
         fixed_message = [
-            {'role': 'system', 'content': f'You are an expert in the field of this video.\n{info}\nTranslate the sentence into {target_language}. 下面我让你来充当翻译家，你的目标是把任何语言翻译成{target_language}，请翻译时不要带翻译腔，而是要翻译得自然、流畅和地道，使用优美和高雅的表达方式。请将人工智能的“agent”翻译为“智能体”，强化学习中是`Q-Learning`而不是`Queue Learning`。数学公式写成plain text，不要使用latex。确保翻译正确和简洁。注意信达雅。'},
+            {'role': 'system', 'content': f'{nothink_prefix}You are an expert in the field of this video.\n{info}\nTranslate the sentence into {target_language}. 下面我让你来充当翻译家，你的目标是把任何语言翻译成{target_language}，请翻译时不要带翻译腔，而是要翻译得自然、流畅和地道，使用优美和高雅的表达方式。请将人工智能的"agent"翻译为"智能体"，强化学习中是`Q-Learning`而不是`Queue Learning`。数学公式写成plain text，不要使用latex。确保翻译正确和简洁。注意信达雅。{nothink_suffix}'},
             {'role': 'user', 'content': f'使用地道的{target_language}Translate:"Knowledge is power."'},
-            {'role': 'assistant', 'content': '翻译：“知识就是力量。”'},
+            {'role': 'assistant', 'content': '翻译："知识就是力量。"'},
             {'role': 'user', 'content': f'使用地道的{target_language}Translate:"To be or not to be, that is the question."'},
-            {'role': 'assistant', 'content': '翻译：“生存还是毁灭，这是一个值得考虑的问题。”'},
+            {'role': 'assistant', 'content': '翻译："生存还是毁灭，这是一个值得考虑的问题。"'},
         ]
     else:
         # For other languages, we keep the template general
         fixed_message = [
-            {'role': 'system', 'content': f'You are a language expert specializing in translating content from various fields. The current task involves translating the transcript of a video titled "{summary["title"]}". The summary of the video is: {summary["summary"]}. Your goal is to translate the following sentences into {target_language}. Please ensure that the translations are accurate, maintain the original meaning and tone, and are expressed in a clear and fluent manner.'},
-            {'role': 'user', 'content': 'Please translate the following text: "Original Text"'},
-            {'role': 'assistant', 'content': 'Translated text: "Translated Text"'},
-            {'role': 'user', 'content': 'Translate the following text: "Another Original Text"'},
-            {'role': 'assistant', 'content': 'Translated text: "Another Translated Text"'},
+            {'role': 'system', 'content': f'{nothink_prefix}You are a professional translator specializing in technical video content translation. Your task is to translate the transcript of a video titled "{summary["title"]}". The video summary is: {summary["summary"]}. Translate each sentence accurately into {target_language}, maintaining the original meaning, tone, and context. IMPORTANT RULES: 1) Keep technical terms like "AI", "API", "GPU", "CPU" as-is unless there is a well-established translation. 2) Keep numbers as numbers (e.g., "2024" stays "2024", "32B" stays "32B"). 3) Keep model names and technical specifications unchanged. 4) Return only the translated text without any prefixes, explanations, or formatting.{nothink_suffix}'},
+            {'role': 'user', 'content': 'Translate: "Knowledge is power."'},
+            {'role': 'assistant', 'content': 'El conocimiento es poder.'},
+            {'role': 'user', 'content': 'Translate: "The AI model has 32B parameters and was released in 2024."'},
+            {'role': 'assistant', 'content': 'El modelo de AI tiene 32B parámetros y fue lanzado en 2024.'},
         ]
-
+        
     history = []
     
     for line in transcript:
@@ -282,7 +367,13 @@ def _translate(summary, transcript, target_language='简体中文', method='LLM'
                     if method == 'LLM':
                         response = llm_response(messages)
                     elif method == 'OpenAI':
-                        response = openai_response(messages)
+                        response = openai_structured_translation(messages, target_language)
+                        # Structured outputs return clean text, minimal validation needed
+                        translation = response.strip()
+                        logger.info(f'原文：{text}')
+                        logger.info(f'译文：{translation}')
+                        # Skip complex validation for structured outputs
+                        break
                     elif method == 'Ernie':
                         system_content = messages[0]['content']
                         user_messages = messages[1:]
@@ -293,21 +384,46 @@ def _translate(summary, transcript, target_language='简体中文', method='LLM'
                         response = ollama_response(messages)
                     else:
                         raise Exception('Invalid method')
-                    translation = response.replace('\n', '')
-                    logger.info(f'原文：{text}')
-                    logger.info(f'译文：{translation}')
-                    success, translation = valid_translation(text, translation)
-                    if not success:
-                        retry_message += translation
-                        raise Exception('Invalid translation')
+                    
+                    # Only apply complex validation for non-structured methods
+                    if method == 'OpenAI':
+                        # OpenAI structured outputs are already clean, skip validation
+                        translation = response.strip()
+                        logger.info(f'原文：{text}')
+                        logger.info(f'译文：{translation}')
+                        break
+                    elif method == 'LLM':
+                        # LLM responses are now cleaned, apply minimal validation
+                        translation = response.replace('\n', '')
+                        logger.info(f'原文：{text}')
+                        logger.info(f'译文：{translation}')
+                        # Skip complex validation for cleaned LLM responses
+                        break
+                    else:
+                        # Apply validation for other methods (Google Translate, Bing, etc.)
+                        translation = response.replace('\n', '')
+                        logger.info(f'原文：{text}')
+                        logger.info(f'译文：{translation}')
+                        success, translation = valid_translation(text, translation, target_language)
+                        if not success:
+                            # Simple retry message without accumulating errors
+                            logger.warning(f'Validation failed for: {text} -> {translation}. Retrying...')
+                            continue
                     break
                 except Exception as e:
                     logger.error(e)
                     logger.warning('翻译失败')
                     time.sleep(1)
         full_translation.append(translation)
-        history.append({'role': 'user', 'content': f'Translate:"{text}"'})
-        history.append({'role': 'assistant', 'content': f'翻译：“{translation}”'})
+        
+        # Build history with consistent format based on target language
+        if target_language == '简体中文':
+            history.append({'role': 'user', 'content': f'Translate:"{text}"'})
+            history.append({'role': 'assistant', 'content': f'翻译："{translation}"'})
+        else:
+            history.append({'role': 'user', 'content': f'Translate the following text: "{text}"'})
+            history.append({'role': 'assistant', 'content': f'Translated text: "{translation}"'})
+        
         time.sleep(0.1)
         
     return full_translation

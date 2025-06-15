@@ -106,7 +106,7 @@ class GPT2InferenceModel(GPT2PreTrainedModel):
         if input_ids.shape[1] != 1:
             text_inputs = input_ids[:, mel_len:]
             text_emb = self.embeddings(text_inputs)
-            text_emb = text_emb + self.text_pos_embedding(text_emb)
+            text_emb = text_emb + self.text_pos_embedding(text_inputs)
             if self.cached_mel_emb.shape[0] != text_emb.shape[0]:
                 mel_emb = self.cached_mel_emb.repeat_interleave(text_emb.shape[0] // self.cached_mel_emb.shape[0], 0)
             else:  # this outcome only occurs once per loop in most cases

@@ -1,16 +1,7 @@
-# Intelligent Multi-language AI Dubbing/Translation Tool - Linly-Dubbing — "AI Empowerment, Language Without Borders"
+# Multilingual Video Translation System With Dubbing and Subtitles
 
 <div align="center">
-<h1>Linly-Dubbing WebUI</h1>
-
-[![madewithlove](https://img.shields.io/badge/made_with-%E2%9D%A4-red?style=for-the-badge&labelColor=orange)](https://github.com/Kedreamix/Linly-Dubbing)
-<img src="docs/linly_logo.png" /><br>
-
-[![Open In Colab](https://img.shields.io/badge/Colab-F9AB00?style=for-the-badge&logo=googlecolab&color=525252)](https://colab.research.google.com/github/Kedreamix/Linly-Dubbing/blob/main/colab_webui.ipynb)
-[![Licence](https://img.shields.io/badge/LICENSE-Apache-red.svg?style=for-the-badge)](https://github.com/Kedreamix/Linly-Talker/blob/main/LICENSE)
-
-[**English**](./README.md) | [**中文简体**](./README_zh.md)
-
+<h1>all-dubber</h1>
 </div>
 
 ---
@@ -19,7 +10,7 @@
 <summary>Table of Contents</summary>
 
 <!-- TOC -->
-- [Intelligent Multi-language AI Dubbing/Translation Tool - Linly-Dubbing — "AI Empowerment, Language Without Borders"](#intelligent-multi-language-ai-dubbingtranslation-tool---linly-dubbing--ai-empowerment-language-without-borders)
+- Sections
   - [Introduction](#introduction)
   - [TO DO LIST](#to-do-list)
   - [Examples](#examples)
@@ -57,9 +48,9 @@
 
 ## Introduction
 
-`Linly-Dubbing` is an intelligent multi-language AI dubbing and translation tool inspired by [`YouDub-webui`](https://github.com/liuzhao1225/YouDub-webui) and further extended and optimized. We aim to offer diverse and high-quality dubbing options by integrating [`Linly-Talker`](https://github.com/Kedreamix/Linly-Talker)’s digital human lip-sync technology, creating a more natural multi-language video experience.
+`all-dubber` is an intelligent multi-language AI dubbing and translation tool adapted from [Linly-Dubbing](https://github.com/Kedreamix/Linly-Dubbing), which in turn was inspired by [`YouDub-webui`](https://github.com/liuzhao1225/YouDub-webui) and further extended and optimized. We aim to offer diverse and high-quality dubbing options by integrating [`Linly-Talker`](https://github.com/Kedreamix/Linly-Talker)’s digital human lip-sync technology, creating a more natural multi-language video experience.
 
-Leveraging cutting-edge AI technologies, `Linly-Dubbing` sets new standards in naturalness and accuracy for multi-language dubbing, making it ideal for international education, global content localization, and more. It helps teams extend their reach and share high-quality content worldwide.
+Leveraging cutting-edge AI technologies, `all-dubber` sets new standards in naturalness and accuracy for multi-language dubbing, making it ideal for international education, global content localization, and more. It helps teams extend their reach and share high-quality content worldwide.
 
 Key features include:
 
@@ -81,7 +72,7 @@ Our mission is to provide seamless, high-quality multi-language dubbing and tran
 - [x] Integrate CosyVoice’s AI voice cloning for high-quality audio translation.
 - [x] Add FunASR AI speech recognition algorithm with optimized Chinese support.
 - [x] Utilize Qwen large language model for multi-language translation.
-- [x] Develop Linly-Dubbing WebUI for easy one-click video generation with customizable parameters.
+- [x] Develop all-dubber WebUI for easy one-click video generation with customizable parameters.
 - [ ] Integrate UVR5 for voice/accompaniment separation and reverb removal, referencing GPTSoVITS.
 - [ ] Improve voice cloning naturalness using GPTSoVITS for fine-tuning.
 - [ ] Implement and optimize digital human lip-sync technology for better dubbing and visual coherence.
@@ -105,12 +96,15 @@ This guide applies to the following test environments:
 - Python 3.10, PyTorch 2.3.1, CUDA 12.1
 - Python 3.10, PyTorch 2.3.1, CUDA 11.8
 
-Follow the steps below to install and configure `Linly-Dubbing`. 
+Follow the steps below to install and configure `all-dubber`.
 
 > [!NOTE]
 >
-> A Colab script is also available for an online experience: [Linly-Dubbing Colab](https://colab.research.google.com/github/Kedreamix/Linly-Dubbing/blob/main/colab_webui.ipynb).
+> The instructions below are outdated and may not easily work.
+> See [setup.sh](setup.sh) for a list of updated steps on Ubuntu 22.04.
+> Future efforts include dockerized version and/or updated tested working configurations on Ubuntu 24.04 and CUDA 12.9
 
+A Colab script is also available for an online experience: [Linly-Dubbing Colab](https://colab.research.google.com/github/Kedreamix/Linly-Dubbing/blob/main/colab_webui.ipynb).
 ### 1. Clone the Repository
 
 First, clone the `Linly-Dubbing` repository to your local machine and initialize submodules.
@@ -341,30 +335,3 @@ Inspired by `Linly-Talker`, this project focuses on digital human lip-sync techn
 
 ---
 
-## License
-
-> [!Caution]
->
-> When using this tool, please comply with relevant laws, including copyright, data protection, and privacy laws. Do not use this tool without permission from the original author and/or rights holder.
-
-`Linly-Dubbing` follows the Apache License 2.0. When using this tool, please comply with relevant laws, including copyright, data protection, and privacy laws. Do not use this tool without permission from the original author and/or rights holder.
-
----
-
-## References
-
-In developing this project, I referenced and drew inspiration from several outstanding open-source projects and related resources. Special thanks to the developers and contributors of these projects and the open-source community. Below are the main projects we referenced:
-
-- [YouDub-webui](https://github.com/liuzhao1225/): Provides a feature-rich web interface for downloading and processing YouTube videos, from which we drew much inspiration and technical implementation details.
-
-- [Coqui TTS](https://github.com/coqui-ai/TTS)
-- [Qwen](https://github.com/QwenLM/Qwen)
-- [FunASR](https://github.com/alibaba-damo-academy/FunASR)
-- [CosyVoice](https://github.com/FunAudioLLM/CosyVoice)
-- [Linly-Talker](https://github.com/Kedreamix/Linly-Talker)
-
----
-
-## Star History
-
-<img src="https://api.star-history.com/svg?repos=Kedreamix/Linly-Dubbing&type=Date" alt="Star History Chart" style="zoom:200%;" />

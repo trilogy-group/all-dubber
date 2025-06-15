@@ -14,12 +14,19 @@ from .step044_tts_edge_tts import tts as edge_tts
 from .cn_tx import TextNorm
 from audiostretchy.stretch import stretch_audio
 normalizer = TextNorm()
-def preprocess_text(text):
-    text = text.replace('AI', '人工智能')
-    text = re.sub(r'(?<!^)([A-Z])', r' \1', text)
-    text = normalizer(text)
-    # 使用正则表达式在字母和数字之间插入空格
-    text = re.sub(r'(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=[a-zA-Z])', ' ', text)
+def preprocess_text(text, target_language='中文'):
+    # Only apply Chinese-specific preprocessing for Chinese languages
+    if target_language in ['中文', '简体中文', '繁体中文']:
+        text = text.replace('AI', '人工智能')
+        text = re.sub(r'(?<!^)([A-Z])', r' \1', text)
+        text = normalizer(text)
+        # 使用正则表达式在字母和数字之间插入空格
+        text = re.sub(r'(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=[a-zA-Z])', ' ', text)
+    else:
+        # For other languages, minimal preprocessing
+        # Keep AI, numbers, and other terms as-is
+        pass
+    
     return text
     
     
@@ -54,7 +61,9 @@ tts_support_languages = {
 }
 
 def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-XiaoxiaoNeural'):
-    assert method in ['xtts', 'bytedance', 'cosyvoice', 'EdgeTTS']
+    # Make method case-insensitive
+    method_lower = method.lower()
+    assert method_lower in ['xtts', 'bytedance', 'cosyvoice', 'edgetts']
     transcript_path = os.path.join(folder, 'translation.json')
     output_folder = os.path.join(folder, 'wavs')
     if not os.path.exists(output_folder):
@@ -68,26 +77,26 @@ def generate_wavs(method, folder, target_language='中文', voice = 'zh-CN-Xiaox
     num_speakers = len(speakers)
     logger.info(f'Found {num_speakers} speakers')
 
-    if target_language not in tts_support_languages[method]:
+    if target_language not in tts_support_languages[method_lower]:
         logger.error(f'{method} does not support {target_language}')
         return f'{method} does not support {target_language}'
         
     full_wav = np.zeros((0, ))
     for i, line in enumerate(transcript):
         speaker = line['speaker']
-        text = preprocess_text(line['translation'])
+        text = preprocess_text(line['translation'], target_language)
         output_path = os.path.join(output_folder, f'{str(i).zfill(4)}.wav')
         speaker_wav = os.path.join(folder, 'SPEAKER', f'{speaker}.wav')
         # if num_speakers == 1:
             # bytedance_tts(text, output_path, speaker_wav, voice_type='BV701_streaming')
         
-        if method == 'bytedance':
+        if method_lower == 'bytedance':
             bytedance_tts(text, output_path, speaker_wav, target_language = target_language)
-        elif method == 'xtts':
+        elif method_lower == 'xtts':
             xtts_tts(text, output_path, speaker_wav, target_language = target_language)
-        elif method == 'cosyvoice':
+        elif method_lower == 'cosyvoice':
             cosyvoice_tts(text, output_path, speaker_wav, target_language = target_language)
-        elif method == 'EdgeTTS':
+        elif method_lower == 'edgetts':
             edge_tts(text, output_path, target_language = target_language, voice = voice)
         start = line['start']
         end = line['end']

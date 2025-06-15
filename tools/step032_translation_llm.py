@@ -30,6 +30,44 @@ def init_llm_model(model_name):
         tokenizer = AutoTokenizer.from_pretrained(pretrained_path)
         print('Finish Load model', pretrained_path)
 
+def clean_llm_translation_response(response):
+    """
+    Clean LLM response to extract only the translation, removing reasoning traces and verbose output.
+    
+    Args:
+        response (str): Raw LLM response that may contain <think>...</think> tags or other verbose content
+        
+    Returns:
+        str: Clean translation text
+    """
+    if not response:
+        return response
+    
+    # Remove <think>...</think> reasoning traces (common in Qwen3 and other reasoning models)
+    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+    
+    # Remove common prefixes that models might add
+    prefixes_to_remove = [
+        'Translation:', 'Translated text:', 'traducción:', 'Traducción:',
+        'The translation is:', 'Here is the translation:', 'Spanish translation:',
+        'En español:', 'In Spanish:', 'Respuesta:', 'Answer:'
+    ]
+    
+    for prefix in prefixes_to_remove:
+        if response.strip().lower().startswith(prefix.lower()):
+            response = response[len(prefix):].strip()
+            break
+    
+    # Remove quotes if the entire response is wrapped in them
+    response = response.strip()
+    if (response.startswith('"') and response.endswith('"')) or (response.startswith('"') and response.endswith('"')):
+        response = response[1:-1]
+    
+    # Remove any remaining newlines and extra whitespace
+    response = ' '.join(response.split())
+    
+    return response.strip()
+
 def llm_response(messages, device='auto'):
     if model is None:
         init_llm_model(model_name)
@@ -52,7 +90,14 @@ def llm_response(messages, device='auto'):
         ]
 
         response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        return response
+        
+        # Clean the response to extract only the translation
+        cleaned_response = clean_llm_translation_response(response)
+        
+        logger.debug(f"Raw LLM response: {response}")
+        logger.debug(f"Cleaned translation: {cleaned_response}")
+        
+        return cleaned_response
     return ''
 
 if __name__ == '__main__':

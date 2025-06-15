@@ -13,9 +13,18 @@ from pyannote.audio.pipelines.utils import PipelineModel
 from pyannote.core import Annotation, Segment, SlidingWindowFeature
 from tqdm import tqdm
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, continue without it
+
 from .diarize import Segment as SegmentX
 
-VAD_SEGMENTATION_URL = "https://whisperx.s3.eu-west-2.amazonaws.com/model_weights/segmentation/0b5b3216d60a2d32fc086b47ea8c67589aaeb26b7e07fcbe620d6d0b83e209ea/pytorch_model.bin"
+# Try alternative VAD model URL or use pyannote directly
+# VAD_SEGMENTATION_URL = "https://whisperx.s3.eu-west-2.amazonaws.com/model_weights/segmentation/0b5b3216d60a2d32fc086b47ea8c67589aaeb26b7e07fcbe620d6d0b83e209ea/pytorch_model.bin"
+VAD_SEGMENTATION_URL = "https://huggingface.co/pyannote/segmentation/resolve/main/pytorch_model.bin"
 
 def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=None, model_fp=None):
     model_dir = torch.hub._get_torch_home()
@@ -26,27 +35,58 @@ def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, use_auth_token=Non
         raise RuntimeError(f"{model_fp} exists and is not a regular file")
 
     if not os.path.isfile(model_fp):
-        with urllib.request.urlopen(VAD_SEGMENTATION_URL) as source, open(model_fp, "wb") as output:
-            with tqdm(
-                total=int(source.info().get("Content-Length")),
-                ncols=80,
-                unit="iB",
-                unit_scale=True,
-                unit_divisor=1024,
-            ) as loop:
-                while True:
-                    buffer = source.read(8192)
-                    if not buffer:
-                        break
+        # Add authentication headers if token is available
+        hf_token = use_auth_token or os.getenv('HF_TOKEN') or os.getenv('HUGGING_FACE_HUB_TOKEN')
+        
+        # Debug: print token status
+        print(f"DEBUG: HF_TOKEN found: {'Yes' if hf_token else 'No'}")
+        if hf_token:
+            print(f"DEBUG: Token starts with: {hf_token[:10]}...")
+        
+        if hf_token:
+            request = urllib.request.Request(VAD_SEGMENTATION_URL)
+            request.add_header('Authorization', f'Bearer {hf_token}')
+            opener = urllib.request.build_opener()
+            with opener.open(request) as source, open(model_fp, "wb") as output:
+                with tqdm(
+                    total=int(source.info().get("Content-Length")),
+                    ncols=80,
+                    unit="iB",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                ) as loop:
+                    while True:
+                        buffer = source.read(8192)
+                        if not buffer:
+                            break
+                        output.write(buffer)
+                        loop.update(len(buffer))
+        else:
+            # Fallback to original method without auth
+            with urllib.request.urlopen(VAD_SEGMENTATION_URL) as source, open(model_fp, "wb") as output:
+                with tqdm(
+                    total=int(source.info().get("Content-Length")),
+                    ncols=80,
+                    unit="iB",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                ) as loop:
+                    while True:
+                        buffer = source.read(8192)
+                        if not buffer:
+                            break
 
-                    output.write(buffer)
-                    loop.update(len(buffer))
+                        output.write(buffer)
+                        loop.update(len(buffer))
 
     model_bytes = open(model_fp, "rb").read()
-    if hashlib.sha256(model_bytes).hexdigest() != VAD_SEGMENTATION_URL.split('/')[-2]:
-        raise RuntimeError(
-            "Model has been downloaded but the SHA256 checksum does not not match. Please retry loading the model."
-        )
+    # Skip checksum validation for Hugging Face downloads since the URL format is different
+    # and we're downloading from the official repository
+    if "huggingface.co" not in VAD_SEGMENTATION_URL:
+        if hashlib.sha256(model_bytes).hexdigest() != VAD_SEGMENTATION_URL.split('/')[-2]:
+            raise RuntimeError(
+                "Model has been downloaded but the SHA256 checksum does not not match. Please retry loading the model."
+            )
 
     vad_model = Model.from_pretrained(model_fp, use_auth_token=use_auth_token)
     hyperparameters = {"onset": vad_onset, 

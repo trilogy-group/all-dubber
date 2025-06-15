@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import time
 from .utils import save_wav
+
 model = None
 
 '''
@@ -23,6 +24,7 @@ def load_model(model_path="models/TTS/XTTS-v2", device='auto'):
           
     logger.info(f'Loading TTS model from {model_path}')
     t_start = time.time()
+    
     if os.path.isdir(model_path):
         print(f"Loading TTS model from {model_path}")
         model = TTS(
@@ -76,6 +78,8 @@ def tts(text, output_path, speaker_wav, model_name="models/TTS/XTTS-v2", device=
         except Exception as e:
             logger.warning(f'TTS {text} 失败')
             logger.warning(e)
+            if retry == 2:  # Last retry
+                raise e
 
 
 if __name__ == '__main__':

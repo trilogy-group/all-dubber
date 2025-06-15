@@ -2,6 +2,7 @@ import json
 import os
 import time
 import traceback
+import argparse
 
 import torch
 from loguru import logger
@@ -98,7 +99,7 @@ def process_video(info, root_folder, resolution,
                   translation_method, translation_target_language,
                   tts_method, tts_target_language, voice,
                   subtitles, speed_up, fps, background_music, bgm_volume, video_volume,
-                  target_resolution, max_retries, progress_callback=None):
+                  target_resolution, max_retries, progress_callback=None, gpu_acceleration=False, video_encoder='libx264', hwaccel=None):
     """
     处理单个视频的完整流程，增加了进度回调函数
 
@@ -230,7 +231,8 @@ def process_video(info, root_folder, resolution,
             try:
                 status, output_video = synthesize_all_video_under_folder(
                     folder, subtitles=subtitles, speed_up=speed_up, fps=fps, resolution=target_resolution,
-                    background_music=background_music, bgm_volume=bgm_volume, video_volume=video_volume)
+                    background_music=background_music, bgm_volume=bgm_volume, video_volume=video_volume,
+                    gpu_acceleration=gpu_acceleration, video_encoder=video_encoder, hwaccel=hwaccel)
                 logger.info(f'视频合成完成: {output_video}')
             except Exception as e:
                 stack_trace = traceback.format_exc()
@@ -259,11 +261,11 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p',
                   demucs_model='htdemucs_ft', device='auto', shifts=5,
                   asr_method='WhisperX', whisper_model='large', batch_size=32, diarization=False,
                   whisper_min_speakers=None, whisper_max_speakers=None,
-                  translation_method='LLM', translation_target_language='简体中文',
-                  tts_method='xtts', tts_target_language='中文', voice='zh-CN-XiaoxiaoNeural',
+                  translation_method='LLM', translation_target_language='Spanish',
+                  tts_method='XTTS', tts_target_language='中文', voice='zh-CN-XiaoxiaoNeural',
                   subtitles=True, speed_up=1.00, fps=30,
                   background_music=None, bgm_volume=0.5, video_volume=1.0, target_resolution='1080p',
-                  max_workers=3, max_retries=5, progress_callback=None):
+                  max_workers=3, max_retries=5, progress_callback=None, gpu_acceleration=False, video_encoder='libx264', hwaccel=None):
     """
     处理整个视频处理流程，增加了进度回调函数
 
@@ -333,7 +335,8 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p',
                     translation_method, translation_target_language,
                     tts_method, tts_target_language, voice,
                     subtitles, speed_up, fps, background_music, bgm_volume, video_volume,
-                    target_resolution, max_retries, progress_callback
+                    target_resolution, max_retries, progress_callback,
+                    gpu_acceleration=gpu_acceleration, video_encoder=video_encoder, hwaccel=hwaccel
                 )
 
                 if success:
@@ -368,7 +371,8 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p',
                             translation_method, translation_target_language,
                             tts_method, tts_target_language, voice,
                             subtitles, speed_up, fps, background_music, bgm_volume, video_volume,
-                            target_resolution, max_retries, progress_callback
+                            target_resolution, max_retries, progress_callback,
+                            gpu_acceleration=gpu_acceleration, video_encoder=video_encoder, hwaccel=hwaccel
                         )
 
                         if success:
@@ -410,9 +414,65 @@ def do_everything(root_folder, url, num_videos=5, resolution='1080p',
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Linly-Dubbing: AI-powered video dubbing tool')
+    parser.add_argument('--url', type=str, default='https://www.bilibili.com/video/BV1kr421M7vz/', 
+                       help='Video URL to process')
+    parser.add_argument('--num_videos', type=int, default=5, 
+                       help='Number of videos to process')
+    parser.add_argument('--root_folder', type=str, default='videos', 
+                       help='Output folder for processed videos')
+    
+    # Translation settings
+    parser.add_argument('--translation_method', type=str, default='LLM', 
+                       choices=['LLM', 'OpenAI', 'Google Translate', 'Bing Translate', 'Ernie', '阿里云-通义千问', 'Ollama'], 
+                       help='Translation method')
+    parser.add_argument('--translation_target_language', type=str, default='Spanish',
+                       help='Target language for translation (e.g., "English", "简体中文", "Español")')
+    
+    # TTS settings  
+    parser.add_argument('--tts_target_language', type=str, default='中文',
+                       help='Target language for TTS (e.g., "中文", "English", "Spanish")')
+    parser.add_argument('--voice', type=str, default='zh-CN-XiaoxiaoNeural',
+                       help='Voice for TTS (e.g., "zh-CN-XiaoxiaoNeural", "en-US-JennyNeural")')
+    
+    # ASR settings
+    parser.add_argument('--asr_method', type=str, default='WhisperX',
+                       choices=['WhisperX', 'Whisper', 'FunASR'], help='ASR method')
+    parser.add_argument('--whisper_model', type=str, default='large',
+                       choices=['tiny', 'base', 'small', 'medium', 'large'], help='Whisper model size')
+    parser.add_argument('--diarization', action='store_true', default=False,
+                       help='Enable speaker diarization (multi-speaker detection)')
+    parser.add_argument('--whisper_min_speakers', type=int, default=None,
+                       help='Minimum number of speakers for diarization')
+    parser.add_argument('--whisper_max_speakers', type=int, default=None,
+                       help='Maximum number of speakers for diarization')
+    
+    # GPU acceleration settings
+    parser.add_argument('--gpu_acceleration', action='store_true', default=False,
+                       help='Enable GPU acceleration for video encoding')
+    parser.add_argument('--video_encoder', type=str, default='libx264',
+                       choices=['libx264', 'h264_nvenc', 'h264_qsv', 'h264_amf'],
+                       help='Video encoder (libx264=CPU, h264_nvenc=NVIDIA, h264_qsv=Intel, h264_amf=AMD)')
+    parser.add_argument('--hwaccel', type=str, default=None,
+                       choices=['cuda', 'qsv', 'vaapi', 'dxva2'],
+                       help='Hardware acceleration for decoding (cuda=NVIDIA, qsv=Intel, vaapi=Linux)')
+    
+    args = parser.parse_args()
+    
     do_everything(
-        root_folder='videos',
-        url='https://www.bilibili.com/video/BV1kr421M7vz/',
-        translation_method='LLM',
-        # translation_method = 'Google Translate', translation_target_language = '简体中文',
+        root_folder=args.root_folder,
+        url=args.url,
+        num_videos=args.num_videos,
+        translation_method=args.translation_method,
+        translation_target_language=args.translation_target_language,
+        tts_target_language=args.tts_target_language,
+        voice=args.voice,
+        asr_method=args.asr_method,
+        whisper_model=args.whisper_model,
+        diarization=args.diarization,
+        whisper_min_speakers=args.whisper_min_speakers,
+        whisper_max_speakers=args.whisper_max_speakers,
+        gpu_acceleration=args.gpu_acceleration,
+        video_encoder=args.video_encoder,
+        hwaccel=args.hwaccel,
     )

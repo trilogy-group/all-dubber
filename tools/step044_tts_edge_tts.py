@@ -5,6 +5,8 @@ import torch
 import time
 from .utils import save_wav
 import sys
+import subprocess
+import shlex
 
 import torchaudio
 model = None
@@ -26,9 +28,25 @@ def tts(text, output_path, target_language='中文', voice = 'zh-CN-XiaoxiaoNeur
         return
     for retry in range(3):
         try:
-            os.system(f'edge-tts --text "{text}" --write-media "{output_path.replace(".wav", ".mp3")}" --voice {voice}')
+            # Use subprocess with proper argument handling instead of os.system
+            mp3_path = output_path.replace(".wav", ".mp3")
+            cmd = [
+                'edge-tts',
+                '--text', text,
+                '--write-media', mp3_path,
+                '--voice', voice
+            ]
+            
+            # Run the command safely
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             logger.info(f'TTS {text}')
             break
+        except subprocess.CalledProcessError as e:
+            logger.warning(f'TTS {text} 失败')
+            logger.warning(f'Command failed with return code {e.returncode}')
+            logger.warning(f'stderr: {e.stderr}')
+            if retry == 2:  # Last retry
+                logger.error(f'EdgeTTS failed after 3 retries for text: {text}')
         except Exception as e:
             logger.warning(f'TTS {text} 失败')
             logger.warning(e)
@@ -39,4 +57,3 @@ if __name__ == '__main__':
     while True:
         text = input('请输入：')
         tts(text, f'playground/{text}.wav', target_language='中文')
-        

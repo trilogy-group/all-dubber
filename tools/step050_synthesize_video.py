@@ -7,6 +7,7 @@ import subprocess
 import time
 import random
 import traceback
+import multiprocessing
 
 from loguru import logger
 
@@ -101,7 +102,7 @@ def convert_resolution(aspect_ratio, resolution='1080p'):
     # return f'{width}x{height}'
     return width, height
     
-def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='1080p', background_music=None, watermark_path=None, bgm_volume=0.5, video_volume=1.0):
+def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='1080p', background_music=None, watermark_path=None, bgm_volume=0.5, video_volume=1.0, gpu_acceleration=False, video_encoder='libx264', hwaccel=None):
     # if os.path.exists(os.path.join(folder, 'video.mp4')):
     #     logger.info(f'Video already synthesized in {folder}')
     #     return
@@ -123,8 +124,9 @@ def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='
     aspect_ratio = get_aspect_ratio(input_video)
     width, height = convert_resolution(aspect_ratio, resolution)
     resolution = f'{width}x{height}'
-    font_size = int(width/128)
-    outline = int(round(font_size/8))
+    # Make subtitles smaller and less prominent
+    font_size = int(width/160)  # Reduced from width/128 to width/160 (smaller font)
+    outline = int(round(font_size/12))  # Reduced from font_size/8 to font_size/12 (thinner outline)
     video_speed_filter = f"setpts=PTS/{speed_up}"
     audio_speed_filter = f"atempo={speed_up}"
     font_path = "./font/SimHei.ttf"
@@ -135,26 +137,47 @@ def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='
         
     # Add watermark if specified
     if watermark_path:
-        watermark_filter = f";[2:v]scale=iw*0.15:ih*0.15[wm];[v][wm]overlay=W-w-10:H-h-10[v]"
-        ffmpeg_command = [
-            'ffmpeg',
+        ffmpeg_command = ['ffmpeg']
+        
+        # Add hardware acceleration if enabled
+        if gpu_acceleration and hwaccel:
+            ffmpeg_command.extend(['-hwaccel', hwaccel])
+            
+        ffmpeg_command.extend([
             '-i', input_video,
             '-i', input_audio,
             '-i', watermark_path,
-            '-filter_complex', filter_complex + watermark_filter,
+            '-filter_complex', filter_complex + f";[2:v]scale=iw*0.15:ih*0.15[wm];[v][wm]overlay=W-w-10:H-h-10[v]",
             '-map', '[v]',
             '-map', '[a]',
             '-r', str(fps),
             '-s', resolution,
-            '-c:v', 'libx264',
+            '-c:v', video_encoder,
             '-c:a', 'aac',
+        ])
+        
+        # Add GPU encoder specific parameters
+        if gpu_acceleration:
+            if video_encoder == 'h264_nvenc':
+                ffmpeg_command.extend(['-preset', 'p7', '-rc', 'vbr', '-b:v', '8M'])
+            elif video_encoder == 'h264_qsv':
+                ffmpeg_command.extend(['-preset', 'veryslow', '-global_quality', '23'])
+            elif video_encoder == 'h264_amf':
+                ffmpeg_command.extend(['-quality', 'quality', '-rc', 'vbr'])
+        
+        ffmpeg_command.extend([
             final_video,
             '-y',
-            '-threads', '2',
-        ]
+            '-threads', str(multiprocessing.cpu_count()),
+        ])
     else:
-        ffmpeg_command = [
-            'ffmpeg',
+        ffmpeg_command = ['ffmpeg']
+        
+        # Add hardware acceleration if enabled
+        if gpu_acceleration and hwaccel:
+            ffmpeg_command.extend(['-hwaccel', hwaccel])
+            
+        ffmpeg_command.extend([
             '-i', input_video,
             '-i', input_audio,
             '-filter_complex', filter_complex,
@@ -162,12 +185,24 @@ def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='
             '-map', '[a]',
             '-r', str(fps),
             '-s', resolution,
-            '-c:v', 'libx264',
+            '-c:v', video_encoder,
             '-c:a', 'aac',
+        ])
+        
+        # Add GPU encoder specific parameters
+        if gpu_acceleration:
+            if video_encoder == 'h264_nvenc':
+                ffmpeg_command.extend(['-preset', 'p7', '-rc', 'vbr', '-b:v', '8M'])
+            elif video_encoder == 'h264_qsv':
+                ffmpeg_command.extend(['-preset', 'veryslow', '-global_quality', '23'])
+            elif video_encoder == 'h264_amf':
+                ffmpeg_command.extend(['-quality', 'quality', '-rc', 'vbr'])
+        
+        ffmpeg_command.extend([
             final_video,
             '-y',
-            '-threads', '2',
-        ]
+            '-threads', str(multiprocessing.cpu_count()),
+        ])
     subprocess.run(ffmpeg_command)
     time.sleep(1)
 
@@ -185,7 +220,7 @@ def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='
             '-c:a', 'aac',                    # Encode the audio as AAC
             final_video_with_bgm,
             '-y',
-            '-threads', '2'
+            '-threads', str(multiprocessing.cpu_count())
         ]
         subprocess.run(ffmpeg_command_bgm)
         os.remove(final_video)
@@ -195,7 +230,7 @@ def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='
     try:
         if subtitles:
             final_video_with_subtitles = final_video.replace('.mp4', '_subtitles.mp4')
-            add_subtitles(final_video, srt_path, final_video_with_subtitles, subtitle_filter, 'ffmpeg')
+            add_subtitles(final_video, srt_path, final_video_with_subtitles, subtitle_filter, 'ffmpeg', gpu_acceleration, video_encoder, hwaccel)
             # os.remove(final_video)
             if os.path.exists(final_video):
                 os.remove(final_video)
@@ -208,7 +243,8 @@ def synthesize_video(folder, subtitles=True, speed_up=1.00, fps=30, resolution='
     return final_video
 
 
-def add_subtitles(video_path, srt_path, output_path, subtitle_filter=None, method='ffmpeg'):
+def add_subtitles(video_path, srt_path, output_path, subtitle_filter=None, method='ffmpeg', 
+                 gpu_acceleration=False, video_encoder='libx264', hwaccel=None):
     """
     给视频文件添加字幕。
 
@@ -218,9 +254,9 @@ def add_subtitles(video_path, srt_path, output_path, subtitle_filter=None, metho
         output_path (str): 输出视频文件的路径。
         subtitle_filter (str): 自定义字幕过滤器，默认为None，使用标准filter。
         method (str): 使用的方法 ('moviepy' 或 'ffmpeg')，默认为 'ffmpeg'。
-
-    返回：
-        bool: 成功返回 True，失败返回 False。
+        gpu_acceleration (bool): 是否使用GPU加速，默认为False。
+        video_encoder (str): 视频编码器，默认为'libx264'。GPU模式下可用'h264_nvenc', 'h264_qsv', 'h264_amf'等。
+        hwaccel (str): 硬件加速解码器，如'cuda', 'qsv', 'vaapi'等，默认为None。
     """
     try:
         # 确保temp目录存在
@@ -299,19 +335,40 @@ def add_subtitles(video_path, srt_path, output_path, subtitle_filter=None, metho
                 font_dir = os.path.abspath("./font")
 
                 # 构建字幕过滤器，使用文件名引用
-                style = "FontName=SimHei,FontSize=15,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,WrapStyle=2"
-                filter_option = f"subtitles={temp_srt_path}:force_style='{style}'"
+                if subtitle_filter is None:
+                    style = "FontName=SimHei,FontSize=15,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2,WrapStyle=2"
+                    filter_option = f"subtitles={temp_srt_path}:force_style='{style}'"
+                else:
+                    filter_option = subtitle_filter
 
                 # 构建命令
-                command = [
-                    'ffmpeg',
+                command = ['ffmpeg']
+                
+                # Add hardware acceleration if enabled
+                if gpu_acceleration and hwaccel:
+                    command.extend(['-hwaccel', hwaccel])
+                
+                command.extend([
                     '-i', f"{temp_video_path}",
                     '-vf', f"{filter_option}",
                     '-c:a', 'copy',
+                    '-c:v', video_encoder,
+                ])
+
+                # Add GPU encoder specific parameters
+                if gpu_acceleration:
+                    if video_encoder == 'h264_nvenc':
+                        command.extend(['-preset', 'p7', '-rc', 'vbr', '-b:v', '5M'])
+                    elif video_encoder == 'h264_qsv':
+                        command.extend(['-preset', 'veryslow', '-global_quality', '23'])
+                    elif video_encoder == 'h264_amf':
+                        command.extend(['-quality', 'quality', '-rc', 'vbr'])
+
+                command.extend([
                     f"{temp_output_path}",
                     '-y',
-                    '-threads', '2',
-                ]
+                    '-threads', str(multiprocessing.cpu_count()),
+                ])
 
                 logger.info(f"执行FFmpeg命令: {' '.join(command)}")
 
@@ -364,7 +421,7 @@ def add_subtitles(video_path, srt_path, output_path, subtitle_filter=None, metho
                 except Exception as e:
                     logger.debug(f"无法删除临时文件 {temp_file}: {e}")
 
-def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.00, fps=30, background_music=None, bgm_volume=0.5, video_volume=1.0, resolution='1080p', watermark_path="f_logo.png"):
+def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.00, fps=30, background_music=None, bgm_volume=0.5, video_volume=1.0, resolution='1080p', watermark_path="f_logo.png", gpu_acceleration=False, video_encoder='libx264', hwaccel=None):
     watermark_path = None if not os.path.exists(watermark_path) else watermark_path
     output_video = None
     for root, dirs, files in os.walk(folder):
@@ -372,7 +429,8 @@ def synthesize_all_video_under_folder(folder, subtitles=True, speed_up=1.00, fps
             output_video = synthesize_video(root, subtitles=subtitles,
                             speed_up=speed_up, fps=fps, resolution=resolution,
                             background_music=background_music,
-                            watermark_path=watermark_path, bgm_volume=bgm_volume, video_volume=video_volume)
+                            watermark_path=watermark_path, bgm_volume=bgm_volume, video_volume=video_volume,
+                            gpu_acceleration=gpu_acceleration, video_encoder=video_encoder, hwaccel=hwaccel)
         # if 'download.mp4' in files and 'video.mp4' not in files:
         #     output_video = synthesize_video(root, subtitles=subtitles,
         #                      speed_up=speed_up, fps=fps, resolution=resolution,
