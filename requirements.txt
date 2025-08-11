@@ -17,6 +17,8 @@ python-dotenv
 openai
 audiostretchy
 modelscope
+Babel>=2.14.0
+polib>=1.2.0
 
 # ASR
 # git+https://github.com/m-bain/whisperx.git
